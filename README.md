@@ -62,3 +62,12 @@ Each service communicates using WebClient:
 
 Order Service → Product Service (to fetch product details)
 Cart Service → Product & Customer Service (to validate cart items)
+
+
+properties file 
+JAVA_OPTS=-Xms256m -Xmx1024m
+yml file
+services:
+  product-service:
+    environment:
+      - JAVA_OPTS=-Xms256m -Xmx1024m
