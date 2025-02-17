@@ -1,5 +1,6 @@
 package com.example.OrderService;
 
+import com.example.OrderService.kafka.KafkaOrderProducer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -14,14 +15,17 @@ import java.math.BigDecimal;
 public class OrderService {
     private final OrderRepository orderRepository;
     private final DatabaseClient databaseClient;
+    private final KafkaOrderProducer kafkaOrderProducer;
 
     /**
      * Creates a new order after validating that both the customer and product exist.
      */
     public Mono<Order> createOrder(Order order) {
         if (order.getCustomerId() == null || order.getProductId() == null) {
-            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Customer ID or Product ID cannot be null"));
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Customer ID or Product ID cannot be null"));
         }
+
         order.setId(null);
         if (order.getTotalPrice() == null) {
             order.setTotalPrice(BigDecimal.ZERO);
@@ -30,9 +34,15 @@ public class OrderService {
         return checkCustomerExists(order.getCustomerId())
                 .then(checkProductExists(order.getProductId()))
                 .then(orderRepository.save(order))
-                .doOnSuccess(savedOrder -> System.out.println(" Order saved with ID: " + savedOrder.getId()))
+                .flatMap(savedOrder -> {
+                    System.out.println("Order saved with ID: " + savedOrder.getId());
+                    OrderEvent orderEvent = OrderMapper.INSTANCE.toOrderEvent(savedOrder);
+                    return kafkaOrderProducer.sendOrderEvent(orderEvent) // Ensures Kafka is processed reactively
+                            .thenReturn(savedOrder);  // Returns the saved order only after Kafka event is sent
+                })
                 .doOnError(error -> System.err.println("Error saving order: " + error.getMessage()));
     }
+
 
     /**
      * Checks if a customer exists in the database.
